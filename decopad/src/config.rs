@@ -100,9 +100,10 @@ ink-scale = 3.0
 commit-delay-ms = 0
 # Distance between the pad's ruled lines, in millimetres on the Tablet.
 line-spacing-mm = 15.0
-# Delay between replayed points, in milliseconds. Raise it if an app drops
-# parts of strokes; Xournal++ replays exactly even at 1.
-replay-interval-ms = 2
+# Pause between replayed points, in milliseconds. 1 is the fastest that
+# apps reproduce exactly (0 makes them merge strokes); raise it if an app
+# drops parts of strokes.
+replay-interval-ms = 1
 "#;
 
 #[derive(Clone, Debug, Default, PartialEq)]
@@ -141,7 +142,7 @@ impl Default for PopupConfig {
             ink_scale: 3.0,
             commit_delay_ms: 0,
             line_spacing_mm: 15.0,
-            replay_interval_ms: 2,
+            replay_interval_ms: 1,
         }
     }
 }

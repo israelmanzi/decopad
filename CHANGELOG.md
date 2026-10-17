@@ -1,5 +1,25 @@
 # Changelog
 
+## 2026-10-18
+
+### Changed
+- Removed the timers. The preview now updates as each pen report arrives,
+  the pointer is tracked through X input events while the pad is open (idle
+  CPU 0.0% instead of polling), and Picture Paste presses Ctrl+V as soon as
+  the focused app has asked about the clipboard instead of after a fixed
+  250 ms.
+- Replay pacing reduced to what measurements require: 1 ms between points
+  and 12 ms at stroke edges and before leaving range (previously 4 ms,
+  later 2 ms). A 34-stroke commit takes 2.6 s.
+- During a Replay under the pad, the pad lets input through instead of
+  hiding. It no longer flickers, and the app below doesn't drop the first
+  stroke while repainting.
+
+### Fixed
+- First stroke of a commit sometimes lost: simplified straight strokes had
+  only two points, and the virtual pen left range too soon after the
+  previous commit. Long straight runs now get extra points.
+
 ## 2026-10-17
 
 ### Added

@@ -249,6 +249,11 @@ def main():
         shot(out, "5-picture-paste")
         run("xdotool", "key", "super+w")
         time.sleep(0.3)
+        # Xournal++ keeps the pasted picture selected, and its next pen press
+        # would only deselect it; clear the selection like a user would.
+        tablet.away()
+        run("xdotool", "key", "Escape")
+        time.sleep(0.2)
 
         # 6. Pen away and no Ink: Tab belongs to the app, not the eraser.
         tablet.away()
@@ -275,18 +280,19 @@ def main():
         time.sleep(0.4)
         report["reopened"] = popup_geometry()
 
-        # 9. Commit where the Popup covers the target: it steps aside.
+        # 9. Commit where the Popup covers the target: the Popup stays and
+        # lets the strokes through to the app below.
         x, y, w, h = popup_geometry()
         run("xdotool", "mousemove", str(x + 60), str(y + 80))
         tablet.hover(4000, 3000)
         write_hi(tablet, 1500, 3000)
         tablet.express_key([e.KEY_E])
-        hidden = False
-        for _ in range(40):
-            hidden |= popup_geometry() is None
+        stayed = True
+        for _ in range(20):
+            stayed &= popup_geometry() is not None
             time.sleep(0.02)
-        report["hidden during covered replay"] = hidden
-        time.sleep(2.0)
+        report["popup stayed during covered replay"] = stayed
+        time.sleep(1.0)
         report["back after covered replay"] = popup_geometry()
         run("xdotool", "key", "super+w")
         time.sleep(0.3)

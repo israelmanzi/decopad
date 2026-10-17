@@ -5,10 +5,11 @@
 use anyhow::{Context, Result, bail};
 use tiny_skia::IntRect;
 use x11rb::connection::{Connection, RequestConnection};
+use x11rb::protocol::shape::{ConnectionExt as _, SK, SO};
 use x11rb::protocol::xproto::{
-    AtomEnum, ChangeWindowAttributesAux, ConfigureWindowAux, ConnectionExt as _, CreateGCAux,
-    CreateWindowAux, Cursor, EventMask, ImageFormat, ImageOrder, PropMode, StackMode, Window,
-    WindowClass,
+    AtomEnum, ChangeWindowAttributesAux, ClipOrdering, ConfigureWindowAux, ConnectionExt as _,
+    CreateGCAux, CreateWindowAux, Cursor, EventMask, ImageFormat, ImageOrder, PropMode, StackMode,
+    Window, WindowClass,
 };
 use x11rb::rust_connection::RustConnection;
 use x11rb::wrapper::ConnectionExt as _;
@@ -52,6 +53,7 @@ pub struct Popup {
     move_cursor: Cursor,
     resize_cursor: Cursor,
     resize_cursor_shown: bool,
+    click_through: bool,
 }
 
 impl Popup {
@@ -136,6 +138,7 @@ impl Popup {
             move_cursor,
             resize_cursor,
             resize_cursor_shown: false,
+            click_through: false,
         })
     }
 
@@ -165,14 +168,13 @@ impl Popup {
     }
 
     pub fn hide(&mut self, conn: &RustConnection) -> Result<()> {
-        self.suspend(conn)?;
+        self.unmap(conn)?;
         self.visible = false;
         self.drag = None;
         Ok(())
     }
 
-    /// Unmaps the window without closing the Popup.
-    pub fn suspend(&mut self, conn: &RustConnection) -> Result<()> {
+    fn unmap(&mut self, conn: &RustConnection) -> Result<()> {
         if self.mapped {
             conn.unmap_window(self.window)?;
             conn.flush()?;
@@ -181,14 +183,30 @@ impl Popup {
         Ok(())
     }
 
-    /// Maps the window again after `suspend`, if the Popup is still open.
-    pub fn resume(&mut self, conn: &RustConnection) -> Result<()> {
-        if self.visible && !self.mapped {
-            self.configure(conn)?;
-            conn.map_window(self.window)?;
-            conn.flush()?;
-            self.mapped = true;
+    /// Lets pen and mouse input pass through the window to whatever is below
+    /// it (`true`), or catches it again (`false`). Used while a Replay draws
+    /// underneath: unmapping instead would make the app below repaint just as
+    /// the first stroke arrives, and a busy app then drops it.
+    pub fn click_through(&mut self, conn: &RustConnection, on: bool) -> Result<()> {
+        if on == self.click_through {
+            return Ok(());
         }
+        match on {
+            true => conn.shape_rectangles(
+                SO::SET,
+                SK::INPUT,
+                ClipOrdering::UNSORTED,
+                self.window,
+                0,
+                0,
+                &[],
+            )?,
+            false => conn.shape_mask(SO::SET, SK::INPUT, self.window, 0, 0, x11rb::NONE)?,
+        };
+        // A round trip: X applies the new input region before this returns,
+        // so pen events sent next cannot overtake it.
+        conn.get_input_focus()?.reply()?;
+        self.click_through = on;
         Ok(())
     }
 

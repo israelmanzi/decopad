@@ -427,12 +427,35 @@ pub fn replay_points(
                     (x, y, p.pressure)
                 })
                 .collect();
-            simplify(&points, tolerance)
+            densify(&simplify(&points, tolerance), MAX_REPLAY_GAP)
         })
         .collect()
 }
 
 const PRESSURE_TOLERANCE: f32 = 0.08;
+/// Longest straight run Replay sends as a single move. The X driver can drop
+/// a sample right after the pen comes into range, which would erase a whole
+/// two-point stroke; a few extra points along long runs make that harmless.
+const MAX_REPLAY_GAP: f64 = 4.0;
+
+/// Adds evenly spaced points so no gap between points exceeds `max_gap`.
+fn densify(points: &[(f64, f64, f32)], max_gap: f64) -> Vec<(f64, f64, f32)> {
+    let mut out = Vec::with_capacity(points.len());
+    for pair in points.windows(2) {
+        let ((ax, ay, ap), (bx, by, bp)) = (pair[0], pair[1]);
+        let steps = ((bx - ax).hypot(by - ay) / max_gap).ceil().max(1.0) as usize;
+        for i in 0..steps {
+            let t = i as f64 / steps as f64;
+            out.push((
+                ax + t * (bx - ax),
+                ay + t * (by - ay),
+                ap + t as f32 * (bp - ap),
+            ));
+        }
+    }
+    out.extend(points.last());
+    out
+}
 
 /// Ramer–Douglas–Peucker over position and pressure: keeps a point when
 /// dropping it would move the line by more than `tolerance` pixels or change
@@ -481,6 +504,17 @@ fn simplify(points: &[(f64, f64, f32)], tolerance: f64) -> Vec<(f64, f64, f32)> 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn densify_caps_gaps_and_keeps_ends() {
+        let line = [(0.0, 0.0, 0.2), (10.0, 0.0, 0.6)];
+        let dense = densify(&line, 4.0);
+        assert_eq!(dense.len(), 4);
+        assert_eq!(dense.first(), Some(&(0.0, 0.0, 0.2)));
+        assert_eq!(dense.last(), Some(&(10.0, 0.0, 0.6)));
+        assert!(dense.windows(2).all(|w| (w[1].0 - w[0].0) <= 4.0));
+        assert_eq!(densify(&[(1.0, 1.0, 0.5)], 4.0), [(1.0, 1.0, 0.5)]);
+    }
 
     #[test]
     fn straight_strokes_collapse_to_their_ends() {

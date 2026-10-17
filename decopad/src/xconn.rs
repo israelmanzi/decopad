@@ -4,6 +4,7 @@ use anyhow::{Context, Result};
 use x11rb::CURRENT_TIME;
 use x11rb::connection::{Connection, RequestConnection};
 use x11rb::protocol::Event;
+use x11rb::protocol::xinput::{self, ConnectionExt as _, XIEventMask};
 use x11rb::protocol::xproto::{
     Atom, AtomEnum, ConnectionExt as _, EventMask, GrabMode, Keycode, ModMask, PropMode,
     SELECTION_NOTIFY_EVENT, SelectionNotifyEvent, SelectionRequestEvent, Window,
@@ -42,6 +43,12 @@ pub enum XEvent {
         root: (i32, i32),
     },
     Release,
+    /// The Pointer moved (reported only while `watch_pointer` is on).
+    PointerMoved,
+    /// The X client owning `client` asked what the clipboard offers.
+    ClipboardAsked {
+        client: u32,
+    },
 }
 
 pub struct XConn {
@@ -53,6 +60,8 @@ pub struct XConn {
     targets: Atom,
     png: Atom,
     clipboard_png: Option<Vec<u8>>,
+    /// Bits of a resource ID that identify the client owning it.
+    client_bits: u32,
 }
 
 /// Lock-key combinations to grab alongside each shortcut, so Caps Lock and
@@ -100,6 +109,10 @@ impl XConn {
             }
         }
 
+        let conn_setup_mask = conn.setup().resource_id_mask;
+        conn.xinput_xi_query_version(2, 0)?
+            .reply()
+            .context("X has no XInput 2")?;
         let x = XConn {
             conn,
             screen_num,
@@ -109,6 +122,7 @@ impl XConn {
             targets,
             png,
             clipboard_png: None,
+            client_bits: !conn_setup_mask,
         };
         x.grab(HotKey::PopupToggle, ModMask::M4, true)?;
         Ok(x)
@@ -158,6 +172,29 @@ impl XConn {
         }
         self.conn.flush()?;
         Ok(())
+    }
+
+    /// Asks X to report Pointer motion (`XEvent::PointerMoved`) or to stop.
+    pub fn watch_pointer(&self, on: bool) -> Result<()> {
+        let mask = if on {
+            XIEventMask::RAW_MOTION
+        } else {
+            XIEventMask::from(0u32)
+        };
+        let masks = [xinput::EventMask {
+            deviceid: xinput::Device::ALL_MASTER.into(),
+            mask: vec![mask],
+        }];
+        self.conn.xinput_xi_select_events(self.root, &masks)?;
+        self.conn.flush()?;
+        Ok(())
+    }
+
+    /// The X client whose window has the keyboard focus, if any.
+    pub fn focused_client(&self) -> Result<Option<u32>> {
+        let focus = self.conn.get_input_focus()?.reply()?.focus;
+        // 0 is None and 1 is PointerRoot: no particular client.
+        Ok((focus > 1).then_some(focus & self.client_bits))
     }
 
     pub fn pointer(&self) -> Result<(i32, i32)> {
@@ -259,7 +296,18 @@ impl XConn {
                         _ => out.push(event),
                     }
                 }
-                Event::SelectionRequest(request) => self.answer_selection(request)?,
+                Event::SelectionRequest(request) => {
+                    if request.target == self.targets && self.clipboard_png.is_some() {
+                        let client = request.requestor & self.client_bits;
+                        out.push(XEvent::ClipboardAsked { client });
+                    }
+                    self.answer_selection(request)?
+                }
+                Event::XinputRawMotion(_) => {
+                    if !out.iter().any(|e| matches!(e, XEvent::PointerMoved)) {
+                        out.push(XEvent::PointerMoved);
+                    }
+                }
                 Event::SelectionClear(_) => self.clipboard_png = None,
                 _ => {}
             }

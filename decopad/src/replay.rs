@@ -18,9 +18,11 @@ pub const X_DEVICE_PREFIX: &str = "decopad pen";
 /// Axis units per screen pixel, so strokes keep sub-pixel precision.
 const SUBPIXEL: f64 = 8.0;
 const MAX_PRESSURE: i32 = 16383;
+/// Pause before a stroke touches down and after it lifts, so a busy app
+/// finishes setting up or closing one stroke before the next events arrive.
+const STROKE_EDGE: Duration = Duration::from_millis(12);
 /// Pressure never drops below this share, so the X driver always registers contact.
 const PRESSURE_FLOOR: f32 = 0.15;
-const SETTLE: Duration = Duration::from_millis(12);
 
 pub struct Job {
     /// Screen-space points `(x, y, pressure)` of each stroke.
@@ -165,26 +167,34 @@ impl VirtualPen {
         Ok(())
     }
 
+    /// Sends the strokes with the least pacing that apps reproduce exactly.
+    /// Measured in Xournal++: with no gap between points the toolkit merges
+    /// whole strokes into one line, and without pauses around each stroke a
+    /// busy app (redrawing after the Popup stepped aside, or still handling
+    /// the previous Commit) clips or merges stroke starts and ends.
     fn replay(&mut self, job: &Job) -> Result<()> {
+        let pace = || thread::sleep(job.interval);
         for stroke in &job.strokes {
             let Some(&(x, y, pressure)) = stroke.first() else {
                 continue;
             };
             self.emit(x, y, None, None, Some(true))?;
-            thread::sleep(SETTLE);
+            thread::sleep(STROKE_EDGE);
             self.emit(x, y, Some(pressure), Some(true), None)?;
-            thread::sleep(job.interval);
+            pace();
             for &(x, y, pressure) in &stroke[1..] {
                 self.emit(x, y, Some(pressure), None, None)?;
-                thread::sleep(job.interval);
+                pace();
             }
             let &(x, y, _) = stroke.last().unwrap();
             self.emit(x, y, None, Some(false), None)?;
-            thread::sleep(SETTLE);
+            thread::sleep(STROKE_EDGE);
         }
         let (x, y) = (f64::from(job.finish_at.0), f64::from(job.finish_at.1));
         self.emit(x, y, None, None, Some(true))?;
-        thread::sleep(SETTLE);
+        // Leaving range straight after the last move gets lost, and the X
+        // driver then mishandles the first stroke of the next Replay.
+        thread::sleep(STROKE_EDGE);
         self.emit(x, y, None, None, Some(false))?;
         Ok(())
     }

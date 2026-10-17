@@ -107,6 +107,9 @@ open.
 - **Paste as picture** lands wherever the app puts pastes. In Xournal++ that
   is the middle of the view, not the pointer. It also replaces what was on
   your clipboard.
+- **Xournal++ keeps a pasted picture selected.** The next pen press, including
+  the first stroke of a commit, only deselects it. Click the page once (or
+  press `Esc` in Xournal++) after pasting.
 
 ## Configuration
 
@@ -125,31 +128,48 @@ Things you might change:
   app's eraser, because that is the one the pen reports as an eraser.
 - `[popup]`: the pad's starting width, ink size, line spacing, an automatic
   commit after a pause (`commit-delay-ms`, off by default) and the replay
-  speed (`replay-interval-ms`).
+  pacing (`replay-interval-ms`, 1 ms by default; raise it if an app drops
+  parts of strokes).
 
 ## Performance
 
 Measured with `tools/bench.py` (simulated tablet at 200 reports/s, release
-build, 2026-10-17):
+build, 2026-10-18) and profiled with `perf`:
 
 | Scenario | CPU (one core) | Memory |
 |---|---|---|
-| Idle, pad closed | 0.0% | 14 MB |
+| Idle, pad closed or open | 0.0% | 14–18 MB |
 | Pen hovering, pad closed | 0.4% | 14 MB |
-| Idle, pad open | 0.2% | 20 MB |
-| Writing, pad open (flat as ink grows) | 1.3–1.5% | 21 MB |
-| Commit of 34 long strokes | 3.1 s | — |
+| Pen hovering, pad open | 1.5% | 18 MB |
+| Writing, pad open (flat as ink grows) | 1.8–2.1% | 19 MB |
+| Commit of 34 long strokes (1,476 points) | 2.6 s | — |
 
-Optimisations behind these numbers:
+What makes it fast:
 
-- The preview's ink is drawn incrementally and only the new pixels are added
-  to its window shape. Before, CPU climbed from 6.5% to 15% as ink grew.
-- Replayed strokes are simplified (Ramer–Douglas–Peucker, 0.2 px and 8%
-  pressure tolerance), cutting points by about 60% with no visible
-  difference.
-- Points are replayed 2 ms apart; Xournal++ reproduced strokes exactly even
-  at 1 ms.
-- The release build uses LTO and is stripped.
+- **Nothing runs on a timer.** The preview updates as each pen report
+  arrives, the pointer is tracked through X input events only while the pad
+  is open, and Picture Paste presses `Ctrl+V` as soon as the focused app has
+  asked what the clipboard holds (100 ms fallback for apps that don't ask
+  in advance).
+- **The preview is incremental.** It keeps an image of the ink and only adds
+  new strokes, so its cost stays flat however much you write. Before, CPU
+  climbed from 6.5% to 15% as ink grew.
+- **Replay sends as few points as possible.** Strokes are simplified
+  (Ramer–Douglas–Peucker, within 0.2 px and 8% pressure), with extra points
+  added only along long straight runs.
+- **The release build** uses LTO and is stripped (1.6 MB).
+
+Replay keeps only the pauses that measurements showed are needed:
+
+- **1 ms between points.** With no gap, the app merges whole strokes into one
+  line.
+- **12 ms where each stroke starts and ends, and before the virtual pen
+  leaves range.** Without them, a busy app clips or merges stroke edges,
+  or loses the first stroke of the next commit.
+
+In tests in Xournal++ (spirals compared pixel by pixel, plus the end-to-end
+suite run three times), every stroke came out exactly. A typical word
+replays in under 0.2 s.
 
 ## How it works
 
@@ -187,7 +207,9 @@ pointer for a minute.
   end-to-end suite. It drives decopad with a simulated tablet into Xournal++
   and saves screenshots of each step.
 - `python3 -I tools/bench.py decopad/target/release/decopad /tmp/bench`:
-  the CPU and memory benchmark.
+  the CPU and memory benchmark. To profile, pass a wrapper script that runs
+  decopad under `perf record -e cpu-clock:u`. Call graphs are blocked here
+  for normal users, so the profile is per function only.
 - `python3 -I tools/capture.py 60 /tmp/capture.log`: records everything the
   real tablet sends.
 

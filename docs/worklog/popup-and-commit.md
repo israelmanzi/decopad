@@ -138,3 +138,30 @@ build is 1.6 MB with LTO.
 Surprises: the upper Pen Button reports as an eraser tool; disabling X's
 eraser device silences the stylus too; apps lose an immediate Ctrl+V after a
 clipboard change; and the X wacom driver smooths uinput tablets by default.
+
+## Follow-up 2026-10-18: removing timers
+Profiled with `perf` (software clock; call graphs are blocked for users
+here): about 55% of decopad's time goes to tiny-skia rasterisation, about 10%
+to malloc, and nothing stands out in decopad's own code.
+
+Each pause was measured before it was kept or removed:
+- **Replay with no pauses:** Xournal++ merged everything into one straight
+  line. 1 ms between points is the minimum.
+- **Stroke-start pause:** without it, starts were clipped at random (spirals
+  scored pixel by pixel against a slow reference: 17–26 differing pixels
+  without it, 7, the noise floor, with 12 ms).
+- **Stroke-end pause and before leaving range:** without them, the first
+  stroke of the next commit was lost.
+- **Two-point strokes:** simplification turned straight strokes into one
+  press and one move, which the driver could drop entirely. Runs longer than
+  4 px now get extra points.
+- **Pad during a covered Replay:** hiding it made Xournal++ repaint as the
+  first stroke arrived. It now goes click-through (empty X Shape input
+  region, followed by a round trip), so nothing is uncovered.
+- **The remaining intermittent loss in the suite was Xournal++ itself:** a
+  pasted picture stays selected and eats the next press. The suite now clears
+  the selection, and the README tells users to.
+- **Timers removed:** the 40 ms preview frame, the 100 ms pointer poll
+  (replaced by XInput2 raw motion while the pad is open) and the 250 ms paste
+  delay (replaced by waiting for the focused client's TARGETS request, with a
+  100 ms fallback).

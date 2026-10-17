@@ -40,12 +40,10 @@ const ERASER_RADIUS_MM: f32 = 2.5;
 const CARET_MM: f64 = 7.0;
 /// Replayed strokes stay within this many pixels of the written ones.
 const REPLAY_TOLERANCE_PX: f64 = 0.2;
-/// Wait between taking the clipboard and pressing Ctrl+V for Picture Paste.
-const PASTE_DELAY: Duration = Duration::from_millis(250);
-/// How often the preview follows new Ink, and how often it checks whether
-/// the Pointer moved.
-const PREVIEW_FRAME: Duration = Duration::from_millis(40);
-const POINTER_POLL: Duration = Duration::from_millis(100);
+/// Picture Paste presses Ctrl+V as soon as the focused app has asked what
+/// the clipboard offers (apps enable Paste only after that answer). Apps
+/// that do not ask in advance get Ctrl+V after this long instead.
+const PASTE_FALLBACK: Duration = Duration::from_millis(100);
 /// Keys in `held` for shortcuts held by the Pen Buttons, after Express Keys 1–8.
 const PEN_BUTTON_KEYS: [usize; 2] = [101, 102];
 const SEPARATOR: &str = "  ·  ";
@@ -89,15 +87,14 @@ pub struct Daemon {
     tip: Option<(i32, i32, bool)>,
     drawn_ring: Option<IntRect>,
     dirty: Option<IntRect>,
-    /// When to press Ctrl+V for a Picture Paste in progress.
-    paste_at: Option<Instant>,
+    /// A Picture Paste waiting for the focused client to ask about the
+    /// clipboard, and when to press Ctrl+V anyway.
+    paste: Option<(Option<u32>, Instant)>,
 
     preview: Preview,
     /// The Pointer as last seen, which is where Ink would land now.
     pointer: (i32, i32),
     preview_stale: bool,
-    /// When the preview next updates while the Popup is open.
-    preview_at: Option<Instant>,
     /// The preview's Ink at delivery size; `None` when it must be redrawn.
     preview_image: Option<InkImage>,
     /// Pieces of strokes written since the preview last updated.
@@ -150,11 +147,10 @@ impl Daemon {
             tip: None,
             drawn_ring: None,
             dirty: None,
-            paste_at: None,
+            paste: None,
             preview,
             pointer: (0, 0),
             preview_stale: false,
-            preview_at: None,
             preview_image: None,
             preview_segments: Vec::new(),
         };
@@ -392,6 +388,22 @@ impl Daemon {
                     self.preview_stale = true;
                 }
             }
+            XEvent::PointerMoved if self.popup.visible && self.replaying.is_none() => {
+                let pointer = self.x.pointer()?;
+                if pointer != self.pointer {
+                    self.pointer = pointer;
+                    self.preview_stale = true;
+                }
+            }
+            XEvent::PointerMoved => {}
+            XEvent::ClipboardAsked { client } => {
+                if self
+                    .paste
+                    .is_some_and(|(focused, _)| focused == Some(client))
+                {
+                    self.paste_now()?;
+                }
+            }
             XEvent::Key(HotKey::PopupToggle) => self.toggle_mode()?,
             XEvent::Key(_) if !self.popup.visible => {}
             XEvent::Key(HotKey::Escape) => self.set_mode(Mode::Desktop)?,
@@ -509,7 +521,7 @@ impl Daemon {
         self.away_since = None;
         self.drawn_ring = None;
         self.preview_stale = true;
-        self.preview_at = Some(Instant::now());
+        self.x.watch_pointer(true)?;
         self.sync_pen_grab();
         Ok(())
     }
@@ -517,7 +529,7 @@ impl Daemon {
     fn close_popup(&mut self) -> Result<()> {
         self.popup.hide(&self.x.conn)?;
         self.preview.hide(&self.x.conn)?;
-        self.preview_at = None;
+        self.x.watch_pointer(false)?;
         self.tip = None;
         self.away_since = None;
         self.eraser = false;
@@ -605,6 +617,9 @@ impl Daemon {
         if let Some(rect) = rect.and_then(|r| self.canvas.clip(r)) {
             self.canvas.compose(rect, ring.map(|(params, _)| params));
             self.popup.upload(&self.x.conn, &self.canvas, rect)?;
+        }
+        if self.preview_stale {
+            self.update_preview()?;
         }
         Ok(())
     }
@@ -724,7 +739,7 @@ impl Daemon {
             ];
         }
         if self.popup.covers(area) {
-            self.popup.suspend(&self.x.conn)?;
+            self.popup.click_through(&self.x.conn, true)?;
         }
 
         self.replaying = Some(next);
@@ -751,7 +766,7 @@ impl Daemon {
             self.x.warp(x, y)?;
             self.pointer = (x, y);
         }
-        self.popup.resume(&self.x.conn)?;
+        self.popup.click_through(&self.x.conn, false)?;
         self.preview_stale = true;
         self.sync_pen_grab();
         Ok(())
@@ -767,9 +782,7 @@ impl Daemon {
         self.x.own_clipboard(self.popup.window, png)?;
         self.ink.clear();
         self.ink_changed();
-        // Apps enable Paste only after asking the new owner what it offers;
-        // pressing Ctrl+V at once loses that race in a busy app.
-        self.paste_at = Some(Instant::now() + PASTE_DELAY);
+        self.paste = Some((self.x.focused_client()?, Instant::now() + PASTE_FALLBACK));
         Ok(())
     }
 
@@ -784,7 +797,7 @@ impl Daemon {
 
     /// The next moment something is scheduled to happen.
     pub fn next_deadline(&self) -> Option<Instant> {
-        [self.commit_deadline(), self.paste_at, self.preview_at]
+        [self.commit_deadline(), self.paste.map(|(_, at)| at)]
             .into_iter()
             .flatten()
             .min()
@@ -793,38 +806,18 @@ impl Daemon {
     /// Runs whatever was scheduled for now or earlier.
     pub fn run_due(&mut self) -> Result<()> {
         let now = Instant::now();
-        if self.paste_at.is_some_and(|due| now >= due) {
-            self.paste_at = None;
-            self.tap(&[KeyCode::KEY_LEFTCTRL, KeyCode::KEY_V])?;
+        if self.paste.is_some_and(|(_, at)| now >= at) {
+            self.paste_now()?;
         }
         if self.commit_deadline().is_some_and(|due| now >= due) {
             self.commit(false)?;
         }
-        if self.preview_at.is_some_and(|due| now >= due) {
-            if self.replaying.is_none() {
-                let pointer = self.x.pointer()?;
-                if pointer != self.pointer {
-                    self.pointer = pointer;
-                    self.preview_stale = true;
-                }
-            }
-            if self.preview_stale {
-                self.update_preview()?;
-            }
-            self.preview_at = self.popup.visible.then(|| {
-                now + if self.preview_stale {
-                    PREVIEW_FRAME
-                } else {
-                    POINTER_POLL
-                }
-            });
-        }
-        // New Ink shows in the preview within a frame.
-        if self.preview_stale && self.popup.visible {
-            let soon = now + PREVIEW_FRAME;
-            self.preview_at = Some(self.preview_at.map_or(soon, |at| at.min(soon)));
-        }
         Ok(())
+    }
+
+    fn paste_now(&mut self) -> Result<()> {
+        self.paste = None;
+        self.tap(&[KeyCode::KEY_LEFTCTRL, KeyCode::KEY_V])
     }
 
     fn adjust_ink_scale(&mut self, delta: f64) {
