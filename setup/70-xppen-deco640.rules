@@ -1,0 +1,5 @@
+# XP-Pen Deco 640 (28bd:2904): give the logged-in seat user access to the
+# tablet's raw HID and evdev nodes, plus /dev/uinput for virtual devices.
+SUBSYSTEM=="hidraw", ATTRS{idVendor}=="28bd", ATTRS{idProduct}=="2904", TAG+="uaccess"
+SUBSYSTEM=="input", ATTRS{idVendor}=="28bd", ATTRS{idProduct}=="2904", TAG+="uaccess"
+KERNEL=="uinput", SUBSYSTEM=="misc", TAG+="uaccess", OPTIONS+="static_node=uinput"

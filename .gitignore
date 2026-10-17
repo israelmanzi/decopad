@@ -1,0 +1,5 @@
+# REA is a separate clone used as an analysis tool, not part of this project
+/rea/
+
+# Rust build output
+target/
