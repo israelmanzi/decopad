@@ -3,3 +3,6 @@
 
 # Rust build output
 target/
+
+# Python bytecode from the tools
+__pycache__/

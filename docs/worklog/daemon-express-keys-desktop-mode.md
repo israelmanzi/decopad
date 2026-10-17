@@ -2,7 +2,7 @@
 
 **Task:** docs/TASKS.md #1
 **Date:** 2026-10-17
-**Status:** In Progress
+**Status:** Done
 
 ## Summary
 `decopad` is a background daemon that owns the Tablet's Express Keys and runs
@@ -49,8 +49,8 @@ New crate at `decopad/`:
    per the design), load, validate with clear errors, reload on save while
    keeping the previous config if the new one is invalid.
 6. `mode`: Pad Mode grabs the Pen node; Desktop Mode releases it. Toggling is
-   deferred until the tip lifts if pressed mid-stroke. Desktop notification on
-   each switch.
+   deferred until the tip lifts if pressed mid-stroke. (Switch notifications
+   were added, then removed at the user's request; only config errors notify.)
 7. `xmap`: on start, set `Wacom Tablet Area` so the Active Area matches the
    screen's aspect ratio.
 8. Hot-plug: watch `/dev/input` with inotify; reattach when the Tablet returns.
@@ -58,3 +58,10 @@ New crate at `decopad/`:
    `cargo install --path decopad`.
 10. Unit tests for combo decoding, action parsing, config parsing and area
     maths; manual verification on the real Tablet.
+
+## Outcome
+Done 2026-10-17, then reshaped by the Popup work: Desktop Mode is now simply
+"Popup closed", the Express Key layout was normalized (see
+popup-and-commit.md), and the art-app defaults (E, [, ]) were dropped. The
+Factory Mode decoding, per-mode config with live reload, single instance,
+hot-plug recovery and autostart shipped as planned.

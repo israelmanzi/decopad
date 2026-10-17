@@ -1,0 +1,7 @@
+[Desktop Entry]
+Type=Application
+Name=decopad
+Comment=XP-Pen Deco 640 keyboard companion
+Exec=sh -c 'exec "$HOME/.cargo/bin/decopad" 2>>"$HOME/.cache/decopad.log"'
+X-GNOME-Autostart-enabled=true
+NoDisplay=true

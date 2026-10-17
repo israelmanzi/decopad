@@ -46,8 +46,24 @@ each arrives as report 6 on the keyboard interface, as one press then release:
 
 Every combo is distinct, so each key can be identified without Raw Mode.
 
+## Pen Buttons
+
+Captured 2026-10-17 while hovering:
+
+- Lower button: status bit 1 (`0xa2`), reported as `BTN_STYLUS`.
+- Upper button: status bit 2, the eraser bit (`0xa4`). The kernel reports it
+  as the eraser tool coming into range (`BTN_TOOL_RUBBER`), not as
+  `BTN_STYLUS2`. The pen has no eraser end.
+- Each press first drops the pen out of range for about 40 ms
+  (`BTN_TOOL_PEN` 0, then the tool returns with the button held).
+- In X, the upper button therefore arrives on the `… Pen eraser` device.
+  Disabling that device also silences `… Pen stylus` (they share one input),
+  so decopad floats it instead.
+
+Earlier captures saw no button events because the buttons were not pressed
+while the pen was in range.
+
 ## Open questions
 
-- Pen Buttons: no button bits or `BTN_STYLUS` events appeared in two captures.
 - The Raw Mode command sent on the vendor interface (the vendor driver or a
   capture will tell).

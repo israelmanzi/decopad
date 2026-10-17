@@ -3,3 +3,5 @@
 SUBSYSTEM=="hidraw", ATTRS{idVendor}=="28bd", ATTRS{idProduct}=="2904", TAG+="uaccess"
 SUBSYSTEM=="input", ATTRS{idVendor}=="28bd", ATTRS{idProduct}=="2904", TAG+="uaccess"
 KERNEL=="uinput", SUBSYSTEM=="misc", TAG+="uaccess", OPTIONS+="static_node=uinput"
+# The simulated Tablet that tools/e2e.py creates through uinput.
+SUBSYSTEM=="input", ATTRS{name}=="decopad-test *", TAG+="uaccess"
