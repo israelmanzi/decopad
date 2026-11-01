@@ -1,0 +1,48 @@
+plugins { id 'com.android.application' }
+
+android {
+    namespace 'org.decopad.spike'
+    compileSdk 35
+
+    defaultConfig {
+        applicationId 'org.decopad.spike'
+        minSdk 34
+        targetSdk 35
+        versionCode 2
+        versionName '0.2'
+
+        ndk { abiFilters 'arm64-v8a' }
+        externalNativeBuild {
+            cmake { cppFlags '-std=c17' }
+        }
+    }
+
+    buildTypes { release { minifyEnabled false } }
+
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
+    }
+
+    externalNativeBuild {
+        cmake { path 'src/main/cpp/CMakeLists.txt' }
+    }
+
+    buildFeatures {
+        aidl true
+        buildConfig true
+    }
+
+    // The Shizuku user service process loads our APK's classes through a
+    // package context; keeping the JNI library extracted makes the fallback
+    // System.load(path) work if System.loadLibrary cannot find it.
+    packaging {
+        jniLibs { useLegacyPackaging true }
+    }
+}
+
+dependencies {
+    implementation 'dev.rikka.shizuku:api:13.1.5'
+    implementation 'dev.rikka.shizuku:provider:13.1.5'
+    testImplementation 'junit:junit:4.13.2'
+}

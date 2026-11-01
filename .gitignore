@@ -1,8 +1,15 @@
-# REA is a separate clone used as an analysis tool, not part of this project
-/rea/
 
 # Rust build output
 target/
 
 # Python bytecode from the tools
 __pycache__/
+
+# Android build output
+android/.gradle/
+android/.kotlin/
+android/build/
+android/app/build/
+android/app/.cxx/
+android/local.properties
+*.iml

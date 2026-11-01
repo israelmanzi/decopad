@@ -28,6 +28,22 @@ Observed on Fedora 43, kernel 7.2.11, XFCE on X11, 2026-10-17.
 Status byte (second byte of report 7): `0xa0` in range, `0xa1` tip down,
 `0xc0` out of range.
 
+Decoded from the interface's report descriptor (109 bytes, read on Android
+with `GET_DESCRIPTOR`; see `android/.../PenDescriptors.java`):
+
+| Bytes | Field |
+|---|---|
+| 0 | report ID `07` |
+| 1 | bit0 tip, bit1 barrel, bit2 eraser, bit3 invert, bit5 in-range; bits 4, 6, 7 padding |
+| 2–3 | X, 0–15999 (little endian) |
+| 4–5 | Y, 0–8999 |
+| 6–7 | pressure, 0–16383, null state allowed |
+| 8 | tilt X, −127…127 |
+| 9 | tilt Y, −127…127 |
+
+`0xa0` is in-range (bit5) plus a stray bit7 that the kernel ignores; `0xa1`
+adds the tip bit. Report length is 10 bytes including the report ID.
+
 ## Express Keys (Factory Mode)
 
 Captured 2026-10-17 with `tools/capture.py`. Eight keys, in the order pressed;
