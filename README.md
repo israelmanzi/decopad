@@ -1,7 +1,10 @@
 # decopad
 
-decopad turns an **XP-Pen Deco 640** drawing tablet into a companion for
-your keyboard on Linux (X11). It has two modes:
+decopad is the software companion for the **XP-Pen Deco 640** drawing
+tablet: a Linux (X11) desktop daemon and an Android phone bridge for the
+same tablet.
+
+On Linux, it has two modes:
 
 - **Desktop Mode** (writing pad closed): the pen is a normal tablet pen, and
   the tablet's keys and pen buttons are shortcuts.
@@ -11,10 +14,19 @@ your keyboard on Linux (X11). It has two modes:
   redraws it into the app at that spot (Xournal++, LibreOffice Draw, Krita,
   …).
 
+The repository contains two parts:
+
+| Part | Where | What |
+|---|---|---|
+| **Linux desktop companion** | `decopad/` | The original X11 daemon described in this section: Express Keys, writing pad, Replay. |
+| **Android phone bridge** | `android/` | Turns the same tablet into a system-wide stylus on an Android phone over USB OTG, using Shizuku and `/dev/uhid`. |
+
+## Linux desktop companion
+
 It is a single 1.6 MB Rust binary that idles at 0% CPU and uses about 1.5%
 of one core while you write.
 
-## Requirements
+### Requirements
 
 - Fedora (or similar) on **X11**, tested with XFCE. Wayland is not supported.
 - The X wacom driver, which Fedora installs by default
@@ -26,7 +38,7 @@ of one core while you write.
 sudo dnf install xinput xorg-x11-drv-wacom libnotify fontconfig
 ```
 
-## Install
+### Install
 
 ```bash
 git clone git@github.com:israelmanzi/decopad.git
@@ -45,9 +57,9 @@ The script:
 
 The log goes to `~/.cache/decopad.log`. Run the script again to update.
 
-## Using it
+### Using it
 
-### Tablet keys
+#### Tablet keys
 
 The eight Express Keys are numbered by the shortcut each one typed before
 decopad (key 1 = `B`, key 2 = `E`, …, key 8 = `Ctrl+Shift+Z`). The same
@@ -62,7 +74,7 @@ position means the same idea in both modes:
 | 5 / 6 | Smaller / larger ink | Zoom out / in |
 | 7 / 8 | Undo / redo | Undo / redo |
 
-### Pen buttons
+#### Pen buttons
 
 | Button | Click | Hold while touching the tablet |
 |---|---|---|
@@ -73,7 +85,7 @@ Undo and redo work on the pad's strokes first. When the pad has nothing to
 undo or redo, they send `Ctrl+Z` / `Ctrl+Y` to the app, so the lower button
 can take back the last commit.
 
-### Keyboard
+#### Keyboard
 
 | Key | Does |
 |---|---|
@@ -88,7 +100,7 @@ writing**: when the pen is near the tablet, or the pad holds ink you have not
 committed. Otherwise they work as usual in your apps, even with the pad
 open.
 
-### Writing pad
+#### Writing pad
 
 - **Drag** the pad with the mouse to move it, or drag its **bottom-right
   corner** to resize it. decopad remembers both.
@@ -111,7 +123,7 @@ open.
   the first stroke of a commit, only deselects it. Click the page once (or
   press `Esc` in Xournal++) after pasting.
 
-## Configuration
+### Configuration
 
 `~/.config/decopad/config.toml` is created on first run and explains every
 option. Changes apply as soon as you save; if a change has a mistake,
@@ -131,7 +143,7 @@ Things you might change:
   pacing (`replay-interval-ms`, 1 ms by default; raise it if an app drops
   parts of strokes).
 
-## Performance
+### Performance
 
 Measured with `tools/bench.py` (simulated tablet at 200 reports/s, release
 build, 2026-10-18) and profiled with `perf`:
@@ -171,7 +183,7 @@ In tests in Xournal++ (spirals compared pixel by pixel, plus the end-to-end
 suite run three times), every stroke came out exactly. A typical word
 replays in under 0.2 s.
 
-## How it works
+### How it works
 
 - decopad finds the tablet by USB ID `28bd:2904` and takes exclusive control
   (`EVIOCGRAB`) of its keyboard node. The keys arrive as fixed factory
@@ -191,7 +203,77 @@ More detail: `docs/CONTEXT.md` (glossary), `docs/hardware-deco-640.md`
 (captured reports), `docs/adr/` (decisions) and `docs/worklog/` (how each
 feature was built and tested).
 
+## Android phone bridge
+
+`android/` makes the same tablet a system-wide stylus on an Android phone
+over USB OTG, without root. Android sees a normal stylus, with pressure,
+tilt, hover and buttons.
+
+### Requirements
+
+- Android 14+ (`minSdk 34`; tested on Android 16, Nothing Phone A015 /
+  MediaTek).
+- [Shizuku](https://shizuku.rikka.app/) running. On a non-rooted phone it
+  has to be started after each reboot from the Shizuku app (on-device
+  wireless debugging) or with adb. It runs as uid shell.
+- The tablet connected through a USB OTG adapter.
+
+### Build and install
+
+```bash
+cd android
+gradle :app:assembleDebug     # Gradle 8.14+, JDK 17, compileSdk 35, NDK 27
+adb install -r app/build/outputs/apk/debug/app-debug.apk
+```
+
+### Using it
+
+1. Start Shizuku, open decopad and grant its Shizuku request once. The
+   permission persists.
+2. Attach the tablet. The app claims the tablet's USB interfaces, creates a
+   virtual stylus and starts forwarding; a foreground notification shows
+   while it runs. Detaching the tablet stops it.
+3. Controls in the app:
+   - **Mapping**: *stretch* fills the chosen region; *fit* keeps the
+     tablet's aspect ratio and letterboxes it.
+   - **Tablet axes**: auto (follow the phone), landscape, portrait CCW or
+     portrait CW. In portrait the tablet is normally turned clockwise (its
+     right edge down); auto picks that.
+   - **Choose screen region…**: choose which part of the phone screen the
+     tablet maps to. Drag a corner to resize, drag inside to move, or drag
+     in empty space to draw a new area. Presets are **Full screen** and
+     **Tablet 16:9** (the largest undistorted region).
+   - Pen buttons: bottom/larger = **Backspace**, top/smaller = **Ctrl+Z**
+     (undo). The barrel bits are hidden from apps.
+   - The eight Express Keys are swallowed while the bridge runs; mapping
+     them is not implemented.
+4. The bridge keeps running in the background. Use **Stop bridge** or
+   unplug the tablet to stop it.
+
+The tablet is powered by the phone over OTG, which is the main power cost.
+The app measured about 0.4% of one core idle, the helper about 0%.
+
+Verified with Squid, Saber and Bihua. ibisPaint X is not tested yet.
+
+### How it works
+
+- The app force-claims the tablet's three HID interfaces and reads the pen
+  interface's report 7 (10 bytes, report ID 7). It reads the tablet's own HID
+  report descriptor and creates a virtual stylus from it on `/dev/uhid`.
+- Shizuku (uid shell) owns the virtual device. Shizuku user services cannot
+  start on MediaTek ROMs (upstream `LoadedApk` NPE), so the bridge starts a
+  small helper executable with Shizuku's `newProcess`; the UserService path
+  remains for devices where it works.
+- Area mapping rewrites X/Y before forwarding. InputReader's fit was measured
+  for all four rotations, so portrait and landscape both map correctly.
+- Pen-button actions go through a short-lived uhid keyboard.
+
+See `docs/android-handoff.md` for the measured transforms, the MediaTek
+issue and the verification log.
+
 ## Development
+
+### Linux desktop
 
 ```bash
 cd decopad
@@ -217,7 +299,24 @@ pointer for a minute.
 name, which is how the tools use a simulated tablet while the real one stays
 plugged in.
 
+### Android bridge
+
+```bash
+cd android
+gradle :app:testDebugUnitTest   # 13 unit tests
+gradle :app:assembleDebug
+```
+
+The tests cover area mapping, report 7 parsing, button edges and the 16:9
+region preset. `adb logcat -s decopad-bridge decopad-helper decopad-uhid`
+shows the bridge, and `adb shell getevent -lp` lists the virtual stylus.
+
 ## Status
 
-Tasks 1–3 in `docs/TASKS.md` are done. Handwriting-to-text at the text
-cursor (task 4) is planned.
+The Linux daemon covers tasks 1–3 in `docs/TASKS.md`; handwriting-to-text
+at the text cursor (task 4) is planned.
+
+The Android bridge is complete for its current phase: USB relay, virtual
+stylus, area mapping, region picker and pen-button Backspace/undo. Remaining
+there: per-app profiles, Express Key mapping and validation in ibisPaint X.
+See `docs/android-handoff.md`.
